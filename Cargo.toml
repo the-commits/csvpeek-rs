@@ -1,0 +1,44 @@
+[package]
+authors = ["Magnus Åberg"]
+name = "csvpeek-rs" 
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "A CLI tool to quickly peek into, list, and filter CSV data."
+license = "GNU 2.0"
+# repository = "https://github.com/TheCommits/csvpeek-rs" # Bra att ha med
+
+[dependencies]
+clap = { version = "4.5.4", features = ["derive", "cargo"] }
+rand = "0.8.5"
+csv = "1.3"
+atty = "0.2"
+
+[dev-dependencies]
+assert_cmd = "2.0.17"
+predicates = "3.1"
+tempfile = "3.10"
+
+[profile.dev]
+opt-level = 0
+debug = true
+strip = "none"
+debug-assertions = true
+overflow-checks = true
+lto = false
+panic = "unwind"
+incremental = true
+codegen-units = 256
+rpath = false
+
+[profile.release]
+opt-level = "z" 
+debug = false
+strip = true
+debug-assertions = false
+overflow-checks = false
+lto = true 
+panic = "abort"
+incremental = false
+codegen-units = 1
+rpath = false
+
