@@ -3,9 +3,8 @@ use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
-use atty;
 
 fn parse_filter_arg(s: &str) -> Result<(String, String), String> {
     match s.split_once('=') {
@@ -85,7 +84,7 @@ struct Args {
 
     /// Filter the list based on COLUMN=VALUE. Can be repeated for multiple AND conditions.
     /// Used with --list.
-    #[clap(long, value_parser = parse_filter_arg, requires = "list", num_args = 0..)] 
+    #[clap(long, value_parser = parse_filter_arg, requires = "list", num_args = 0..)]
     filter: Option<Vec<(String, String)>>,
 
     /// Path to a single CSV data file. Use "-" to read from stdin.
@@ -204,7 +203,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             load_data_from_directory(dir_path, args.raw)?
         } else if let Some(file_path) = &args.data_file {
             if file_path.to_string_lossy() == "-" {
-                if !args.raw && atty::is(atty::Stream::Stdin) {
+                if !args.raw && std::io::stdin().is_terminal() {
                     println!("Reading CSV data from stdin (specified by '-f -')...");
                 }
                 load_data_from_stdin()?
@@ -215,7 +214,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 load_data_from_csv(file_path)?
             }
         } else {
-            if atty::is(atty::Stream::Stdin) {
+            if std::io::stdin().is_terminal() {
                 Args::command().print_help()?;
                 eprintln!("\nError: No input source specified. Please use -f <file>, -d <directory>, or pipe data to stdin.");
                 std::process::exit(1);
@@ -268,8 +267,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                  if file_path.to_string_lossy() == "-" { "stdin".to_string() }
                  else { format!("file '{}'", file_path.display()) }
             } else { 
-                if atty::is(atty::Stream::Stdin) { "(no input specified - error handled)".to_string() }
-                else { "stdin".to_string() }
+                "stdin".to_string() 
             };
             list_title = format!("List from {} (displaying column(s): {})", source_name_str, display_cols_str);
         }
@@ -330,7 +328,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 println!("{}", current_line_values.join("\t"));
             }
         }
-    } else {
+    } else { 
         let mut rng = rand::thread_rng();
         if let Some(random_record) = records.choose(&mut rng) {
             let mut values_to_print = Vec::new();
@@ -348,7 +346,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 } else if let Some(file_path) = &args.data_file {
                     if file_path.to_string_lossy() == "-" { "stdin".to_string() }
                     else { format!("file '{}'", file_path.display()) }
-                } else { if atty::is(atty::Stream::Stdin) {"(interactive mode without input - error handled)".to_string()} else {"stdin".to_string()} };
+                } else { 
+                    "stdin".to_string()
+                };
                 println!("Random entry (from column(s) '{}' in {}): {}", display_cols_str, source_name, values_to_print.join("\t"));
             } else {
                 println!("{}", values_to_print.join("\t"));
