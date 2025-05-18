@@ -6,6 +6,8 @@ edition = "2021"
 description = "A CLI tool to quickly peek into, list, and filter CSV data."
 license = "GPL-3.0-only"
 repository = "https://github.com/the-commits/csvpeek-rs"
+readme = "README.md"
+homepage = "https://csvpeek.rs"
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
