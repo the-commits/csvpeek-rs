@@ -1,10 +1,10 @@
 [package]
-authors = ["Magnus Åberg <himself@magnusaberg.me"]
+authors = ["Magnus Åberg <himself@magnusaberg.me>"]
 name = "csvpeek-rs" 
 version = "0.1.0-alpha.2"
 edition = "2021"
 description = "A CLI tool to quickly peek into, list, and filter CSV data."
-license = "GNU 2.0"
+license = "GPL-3.0-only"
 repository = "https://github.com/the-commits/csvpeek-rs"
 
 [dependencies]
