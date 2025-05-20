@@ -1,25 +1,65 @@
 use clap::{CommandFactory, Parser};
 use rand::seq::SliceRandom;
-use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
+use std::fmt;
 
-fn parse_filter_arg(s: &str) -> Result<(String, String), String> {
-    match s.split_once('=') {
-        Some((key_str, value_str)) => {
-            let key = key_str.trim();
-            if key.is_empty() {
-                Err(format!("Invalid filter format: Column name cannot be empty in '{}'. Expected COLUMN=VALUE.", s))
-            } else {
-                Ok((key.to_string(), value_str.trim().to_string()))
-            }
-        }
-        None => {
-            Err(format!("Invalid filter format. Expected COLUMN=VALUE, got '{}'", s))
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Operator {
+    Eq,
+    NotEq,
+    Lt,
+    Gt,
+    LtEq,
+    GtEq,
+}
+impl fmt::Display for Operator {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operator::Eq => write!(f, "="),
+            Operator::NotEq => write!(f, "!="),
+            Operator::Lt => write!(f, "<"),
+            Operator::Gt => write!(f, ">"),
+            Operator::LtEq => write!(f, "<="),
+            Operator::GtEq => write!(f, ">="),
         }
     }
+}
+
+fn parse_filter_arg(s: &str) -> Result<(String, Operator, String), String> {
+    let (key_str_full, op, val_str_full) = if let Some((k, v)) = s.split_once("!=") {
+        (k, Operator::NotEq, v)
+    } else if let Some((k, v)) = s.split_once(">=") {
+        (k, Operator::GtEq, v)
+    } else if let Some((k, v)) = s.split_once("<=") {
+        (k, Operator::LtEq, v)
+    } else if let Some((k, v)) = s.split_once('=') {
+        (k, Operator::Eq, v)
+    } else if let Some((k, v)) = s.split_once('>') {
+        (k, Operator::Gt, v)
+    } else if let Some((k, v)) = s.split_once('<') {
+        (k, Operator::Lt, v)
+    } else {
+        return Err(format!(
+            "Invalid filter format: Operator (e.g., =, !=, >, <, >=, <=) missing or unrecognized in '{}'. Expected COLUMN<OP>VALUE.", s
+        ));
+    };
+
+    let key = key_str_full.trim();
+
+    if key.is_empty() {
+        return Err(format!("Invalid filter format: Column name cannot be empty in '{}'. Expected COLUMN<OP>VALUE.", s));
+    }
+
+    if key.chars().any(|c| "<>=!".contains(c)) {
+        return Err(format!(
+            "Invalid filter format: Column name '{}' is malformed (contains operator characters) in filter string '{}'.", key, s
+        ));
+    }
+    
+    Ok((key.to_string(), op, val_str_full.trim().to_string()))
 }
 
 const LONG_ABOUT: &str = "csvpeek-rs: Quickly Inspect and Process Your CSV Data from the Command Line
@@ -82,10 +122,11 @@ struct Args {
     #[clap(short, long, group = "mode")]
     list: bool,
 
-    /// Filter the list based on COLUMN=VALUE. Can be repeated for multiple AND conditions.
+    /// Filter the list based on COLUMN<OP>VALUE (e.g., "Age>=30", "City!=London").
+    /// OP can be =, !=, >, <, >=, <=. Can be repeated for multiple AND conditions.
     /// Used with --list.
     #[clap(long, value_parser = parse_filter_arg, requires = "list", num_args = 0..)]
-    filter: Option<Vec<(String, String)>>,
+    filter: Option<Vec<(String, Operator, String)>>, 
 
     /// Path to a single CSV data file. Use "-" to read from stdin.
     /// If neither -f nor -d is given, 'data.csv' is attempted or stdin if piped.
@@ -113,7 +154,6 @@ fn parse_csv_from_reader<R: Read>(reader_source: R) -> Result<(Vec<String>, Vec<
     if headers.is_empty() {
         return Err("CSV data is missing headers or is empty.".into());
     }
-    
     let mut records_data = Vec::new();
     for result in reader.records() {
         let record: csv::StringRecord = result?;
@@ -134,7 +174,7 @@ fn load_data_from_stdin() -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<d
 
 fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let mut master_headers: Option<Vec<String>> = None;
-    let mut combined_records: Vec<csv::StringRecord> = Vec::new(); // Ändrad typ
+    let mut combined_records: Vec<csv::StringRecord> = Vec::new();
     let mut files_processed = 0;
     let mut csv_file_paths: Vec<PathBuf> = Vec::new();
 
@@ -155,7 +195,7 @@ fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<S
         if !be_quiet {
             println!("Reading file: {}", path.display());
         }
-        match load_data_from_csv(&path) { 
+        match load_data_from_csv(&path) {
             Ok((current_headers, current_records)) => {
                 if master_headers.is_none() {
                     master_headers = Some(current_headers);
@@ -216,9 +256,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("\nError: No input source specified. Please use -f <file>, -d <directory>, or pipe data to stdin.");
                 std::process::exit(1);
             } else {
-                if !args.raw {
+                 if !args.raw {
                     println!("No input file specified, reading CSV data from piped stdin...");
-                }
+                 }
                 load_data_from_stdin()?
             }
         }
@@ -231,12 +271,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let header_to_idx: HashMap<String, usize> = headers
-        .iter()
-        .enumerate()
-        .map(|(i, header_name)| (header_name.clone(), i))
-        .collect();
-
     let columns_to_display_names: Vec<String> = if let Some(ref specified_cols_args) = args.columns {
         let mut valid_cols = Vec::new();
         for col_name_arg in specified_cols_args {
@@ -244,14 +278,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 valid_cols.push(found_header.clone());
             } else {
                 if !args.raw {
-                    eprintln!("Error: Specified column '{}' not found in CSV headers: {:?}", col_name_arg, headers);
+                    eprintln!("Error: Specified display column '{}' not found in CSV headers: {:?}", col_name_arg, headers);
                 }
                 std::process::exit(1); 
             }
         }
         if valid_cols.is_empty() { 
              if !args.raw {
-                eprintln!("Error: No valid columns were specified for display (or provided list was empty).");
+                eprintln!("Error: No valid display columns were specified (or provided list was empty).");
              }
              std::process::exit(1);
         }
@@ -261,7 +295,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     };
 
     let display_column_indices: Vec<usize> = columns_to_display_names.iter()
-        .map(|name| *header_to_idx.get(name).expect("Validated column name not found in header_to_idx map, this should not happen."))
+        .map(|name| headers.iter().position(|h| h == name).expect("Internal error: Validated display column name not found in headers during index lookup."))
         .collect();
 
     if args.list {
@@ -274,35 +308,60 @@ fn main() -> Result<(), Box<dyn Error>> {
                  if file_path.to_string_lossy() == "-" { "stdin".to_string() }
                  else { format!("file '{}'", file_path.display()) }
             } else { 
-                "stdin".to_string() 
+                "stdin".to_string()
             };
             list_title = format!("List from {} (displaying column(s): {})", source_name_str, display_cols_str);
         }
 
-        let records_to_process_refs: Vec<&csv::StringRecord> = if let Some(filters) = &args.filter {
-            let mut validated_filters: Vec<(usize, String)> = Vec::new();
-            for (filter_column_name_arg, filter_value) in filters { 
-                if let Some(actual_header_name) = headers.iter().find(|h| h.eq_ignore_ascii_case(filter_column_name_arg)) {
-                    let idx = *header_to_idx.get(actual_header_name).expect("Validated filter column name not found in map.");
-                    validated_filters.push((idx, filter_value.clone()));
+        let records_to_process_refs: Vec<&csv::StringRecord> = if let Some(raw_filters) = &args.filter {
+            let mut validated_filters: Vec<(usize, Operator, String)> = Vec::new();
+            for (user_col_name, op, val_str) in raw_filters {
+                if let Some(idx) = headers.iter().position(|h| h.eq_ignore_ascii_case(user_col_name)) {
+                    validated_filters.push((idx, *op, val_str.clone()));
                 } else {
                     if !args.raw {
-                       eprintln!("Error: Filter column '{}' not found in CSV file headers: {:?}", filter_column_name_arg, headers);
+                       eprintln!("Error: Filter column '{}' not found in CSV file headers: {:?}", user_col_name, headers);
                     }
                     std::process::exit(1);
                 }
             }
+            
             if !args.raw {
-                let filter_descriptions: Vec<String> = filters.iter()
-                    .map(|(col, val)| format!("{} = '{}'", col, val)) // Använd originalnamnet användaren skrev för beskrivning
+                let filter_descriptions: Vec<String> = raw_filters.iter()
+                    .map(|(col, op, val)| format!("{} {} '{}'", col, op, val)) // op använder Display trait
                     .collect();
                 list_title = format!("{} filtered where {}", list_title, filter_descriptions.join(" AND "));
             }
             
-            records.iter().filter(|record| {
-                validated_filters.iter().all(|(col_idx, filter_value)| {
-                    record.get(*col_idx)
-                        .map_or(false, |val_in_rec| val_in_rec.eq_ignore_ascii_case(filter_value))
+            records.iter().filter(|record| { // record är &csv::StringRecord
+                validated_filters.iter().all(|(col_idx, operator, filter_value_str)| {
+                    if let Some(value_in_record_str) = record.get(*col_idx) {
+                        match operator {
+                            Operator::Eq => value_in_record_str.eq_ignore_ascii_case(filter_value_str),
+                            Operator::NotEq => !value_in_record_str.eq_ignore_ascii_case(filter_value_str),
+                            Operator::Lt | Operator::Gt | Operator::LtEq | Operator::GtEq => {
+                                let record_num_res = value_in_record_str.trim().parse::<f64>();
+                                let filter_num_res = filter_value_str.trim().parse::<f64>();
+                                if let (Ok(record_num), Ok(filter_num)) = (record_num_res, filter_num_res) {
+                                    match operator { 
+                                        Operator::Lt => record_num < filter_num,
+                                        Operator::Gt => record_num > filter_num,
+                                        Operator::LtEq => record_num <= filter_num,
+                                        Operator::GtEq => record_num >= filter_num,
+                                        _ => false, 
+                                    }
+                                } else { 
+                                    match operator {
+                                        Operator::Lt => value_in_record_str < filter_value_str,
+                                        Operator::Gt => value_in_record_str > filter_value_str,
+                                        Operator::LtEq => value_in_record_str <= filter_value_str,
+                                        Operator::GtEq => value_in_record_str >= filter_value_str,
+                                        _ => false,
+                                    }
+                                }
+                            }
+                        }
+                    } else { false }
                 })
             }).collect()
         } else {
@@ -328,7 +387,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}. {}", index + 1, line_str);
                 }
             }
-        } else { 
+        } else {
             for record_ref in &records_to_process_refs {
                 let mut current_line_values = Vec::new();
                 for &idx in &display_column_indices {
@@ -375,38 +434,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_filter_arg_valid() {
-        assert_eq!(
-            parse_filter_arg("Artist=Queen"),
-            Ok(("Artist".to_string(), "Queen".to_string()))
-        );
-        assert_eq!(
-            parse_filter_arg("  Year = 1999  "),
-            Ok(("Year".to_string(), "1999".to_string()))
-        );
+    fn test_parse_filter_arg_valid_ops() {
+        assert_eq!(parse_filter_arg("Col=Val"), Ok(("Col".to_string(), Operator::Eq, "Val".to_string())));
+        assert_eq!(parse_filter_arg("Col!=Val"), Ok(("Col".to_string(), Operator::NotEq, "Val".to_string())));
+        assert_eq!(parse_filter_arg("Col>Val"), Ok(("Col".to_string(), Operator::Gt, "Val".to_string())));
+        assert_eq!(parse_filter_arg("Col<Val"), Ok(("Col".to_string(), Operator::Lt, "Val".to_string())));
+        assert_eq!(parse_filter_arg("Col>=Val"), Ok(("Col".to_string(), Operator::GtEq, "Val".to_string())));
+        assert_eq!(parse_filter_arg("Col<=Val"), Ok(("Col".to_string(), Operator::LtEq, "Val".to_string())));
+        assert_eq!(parse_filter_arg("  Col  >=  Val  "), Ok(("Col".to_string(), Operator::GtEq, "Val".to_string())));
     }
 
     #[test]
-    fn test_parse_filter_arg_invalid() {
-        assert!(parse_filter_arg("ArtistQueen").is_err());
-        assert_eq!( 
-            parse_filter_arg("Artist="),
-            Ok(("Artist".to_string(), "".to_string()))
-         );
+    fn test_parse_filter_arg_invalid_ops_or_format() {
+        assert!(parse_filter_arg("ColVal").is_err());
+        assert!(parse_filter_arg("Col<>Val").is_err());
+        assert_eq!(parse_filter_arg("Col><Val"), Ok(("Col".to_string(), Operator::Gt, "<Val".to_string())));
     }
 
-     #[test]
-     fn test_parse_filter_arg_empty_key_error() {
-         let result = parse_filter_arg("=Value");
-         assert!(result.is_err());
-         if let Err(e) = result {
-             assert!(e.contains("Column name cannot be empty"));
-         }
-
-         let result_empty_both = parse_filter_arg("=");
-         assert!(result_empty_both.is_err());
-         if let Err(e) = result_empty_both {
+    #[test]
+    fn test_parse_filter_arg_empty_key_error() {
+        let result = parse_filter_arg("=Value");
+        assert!(result.is_err());
+        if let Err(e) = result {
             assert!(e.contains("Column name cannot be empty"));
         }
-     }
+        let result_op = parse_filter_arg(">=Value");
+        assert!(result_op.is_err());
+        if let Err(e) = result_op {
+            assert!(e.contains("Column name cannot be empty"));
+        }
+    }
+
+    #[test]
+    fn test_parse_filter_arg_empty_value_is_ok() {
+         assert_eq!(parse_filter_arg("Col="), Ok(("Col".to_string(), Operator::Eq, "".to_string())));
+         assert_eq!(parse_filter_arg("Col>="), Ok(("Col".to_string(), Operator::GtEq, "".to_string())));
+    }
 }
