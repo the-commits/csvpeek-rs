@@ -107,37 +107,34 @@ struct Args {
     raw: bool,
 }
 
-fn parse_csv_from_reader<R: Read>(reader_source: R) -> Result<(Vec<String>, Vec<HashMap<String, String>>), Box<dyn Error>> {
+fn parse_csv_from_reader<R: Read>(reader_source: R) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let mut reader = csv::Reader::from_reader(reader_source);
     let headers = reader.headers()?.iter().map(String::from).collect::<Vec<String>>();
     if headers.is_empty() {
         return Err("CSV data is missing headers or is empty.".into());
     }
+    
     let mut records_data = Vec::new();
     for result in reader.records() {
-        let record = result?;
-        let mut row_map = HashMap::new();
-        for (header, field) in headers.iter().zip(record.iter()) {
-            row_map.insert(header.clone(), field.to_string());
-        }
-        records_data.push(row_map);
+        let record: csv::StringRecord = result?;
+        records_data.push(record);
     }
     Ok((headers, records_data))
 }
 
-fn load_data_from_csv(filepath: &PathBuf) -> Result<(Vec<String>, Vec<HashMap<String, String>>), Box<dyn Error>> {
+fn load_data_from_csv(filepath: &PathBuf) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let file = fs::File::open(filepath)?;
     parse_csv_from_reader(file)
 }
 
-fn load_data_from_stdin() -> Result<(Vec<String>, Vec<HashMap<String, String>>), Box<dyn Error>> {
+fn load_data_from_stdin() -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let stdin = io::stdin();
     parse_csv_from_reader(stdin.lock())
 }
 
-fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<String>, Vec<HashMap<String, String>>), Box<dyn Error>> {
+fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let mut master_headers: Option<Vec<String>> = None;
-    let mut combined_records: Vec<HashMap<String, String>> = Vec::new();
+    let mut combined_records: Vec<csv::StringRecord> = Vec::new(); // Ändrad typ
     let mut files_processed = 0;
     let mut csv_file_paths: Vec<PathBuf> = Vec::new();
 
@@ -158,7 +155,7 @@ fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<S
         if !be_quiet {
             println!("Reading file: {}", path.display());
         }
-        match load_data_from_csv(&path) {
+        match load_data_from_csv(&path) { 
             Ok((current_headers, current_records)) => {
                 if master_headers.is_none() {
                     master_headers = Some(current_headers);
@@ -195,7 +192,7 @@ fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<S
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
-    let (headers, records) = {
+    let (headers, records): (Vec<String>, Vec<csv::StringRecord>) = {
         if let Some(dir_path) = &args.directory {
             if !args.raw {
                 println!("Reading CSV files from directory: {}", dir_path.display());
@@ -234,9 +231,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let columns_to_display: Vec<String> = if let Some(ref specified_cols) = args.columns {
+    let header_to_idx: HashMap<String, usize> = headers
+        .iter()
+        .enumerate()
+        .map(|(i, header_name)| (header_name.clone(), i))
+        .collect();
+
+    let columns_to_display_names: Vec<String> = if let Some(ref specified_cols_args) = args.columns {
         let mut valid_cols = Vec::new();
-        for col_name_arg in specified_cols {
+        for col_name_arg in specified_cols_args {
             if let Some(found_header) = headers.iter().find(|h| h.eq_ignore_ascii_case(col_name_arg)) {
                 valid_cols.push(found_header.clone());
             } else {
@@ -257,10 +260,14 @@ fn main() -> Result<(), Box<dyn Error>> {
         vec![headers.first().ok_or_else(|| Box::<dyn Error>::from("No headers found in data (cannot determine default display column)."))?.clone()]
     };
 
+    let display_column_indices: Vec<usize> = columns_to_display_names.iter()
+        .map(|name| *header_to_idx.get(name).expect("Validated column name not found in header_to_idx map, this should not happen."))
+        .collect();
+
     if args.list {
         let mut list_title = String::new();
         if !args.raw {
-            let display_cols_str = columns_to_display.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(", ");
+            let display_cols_str = columns_to_display_names.join(", ");
             let source_name_str = if let Some(dir_path) = &args.directory {
                 format!("directory '{}'", dir_path.display())
             } else if let Some(file_path) = &args.data_file {
@@ -272,27 +279,30 @@ fn main() -> Result<(), Box<dyn Error>> {
             list_title = format!("List from {} (displaying column(s): {})", source_name_str, display_cols_str);
         }
 
-        let records_to_process_refs: Vec<&HashMap<String, String>> = if let Some(filters) = &args.filter {
-            for (filter_column, _) in filters { 
-                if !headers.iter().any(|h| h.eq_ignore_ascii_case(filter_column)) {
+        let records_to_process_refs: Vec<&csv::StringRecord> = if let Some(filters) = &args.filter {
+            let mut validated_filters: Vec<(usize, String)> = Vec::new();
+            for (filter_column_name_arg, filter_value) in filters { 
+                if let Some(actual_header_name) = headers.iter().find(|h| h.eq_ignore_ascii_case(filter_column_name_arg)) {
+                    let idx = *header_to_idx.get(actual_header_name).expect("Validated filter column name not found in map.");
+                    validated_filters.push((idx, filter_value.clone()));
+                } else {
                     if !args.raw {
-                       eprintln!("Error: Filter column '{}' not found in CSV file headers: {:?}", filter_column, headers);
+                       eprintln!("Error: Filter column '{}' not found in CSV file headers: {:?}", filter_column_name_arg, headers);
                     }
                     std::process::exit(1);
                 }
             }
             if !args.raw {
                 let filter_descriptions: Vec<String> = filters.iter()
-                    .map(|(col, val)| format!("{} = '{}'", col, val))
+                    .map(|(col, val)| format!("{} = '{}'", col, val)) // Använd originalnamnet användaren skrev för beskrivning
                     .collect();
                 list_title = format!("{} filtered where {}", list_title, filter_descriptions.join(" AND "));
             }
+            
             records.iter().filter(|record| {
-                filters.iter().all(|(filter_column, filter_value)| {
-                    if let Some(value_in_record) = record.keys().find(|k| k.eq_ignore_ascii_case(filter_column)).and_then(|found_key| record.get(found_key)) {
-                        return value_in_record.eq_ignore_ascii_case(filter_value);
-                    }
-                    false
+                validated_filters.iter().all(|(col_idx, filter_value)| {
+                    record.get(*col_idx)
+                        .map_or(false, |val_in_rec| val_in_rec.eq_ignore_ascii_case(filter_value))
                 })
             }).collect()
         } else {
@@ -307,9 +317,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let mut lines_buffer: Vec<String> = Vec::new();
                 for record_ref in &records_to_process_refs {
                     let mut current_line_values = Vec::new();
-                    for col_name in &columns_to_display {
-                        let value = record_ref.get(col_name).cloned().unwrap_or_else(|| String::from("[N/A]"));
-                        current_line_values.push(value);
+                    for &idx in &display_column_indices {
+                        let value = record_ref.get(idx).unwrap_or("[N/A]");
+                        current_line_values.push(value.to_string());
                     }
                     lines_buffer.push(current_line_values.join("\t"));
                 }
@@ -321,26 +331,26 @@ fn main() -> Result<(), Box<dyn Error>> {
         } else { 
             for record_ref in &records_to_process_refs {
                 let mut current_line_values = Vec::new();
-                for col_name in &columns_to_display {
-                    let value = record_ref.get(col_name).cloned().unwrap_or_default();
-                    current_line_values.push(value);
+                for &idx in &display_column_indices {
+                    let value = record_ref.get(idx).unwrap_or(""); 
+                    current_line_values.push(value.to_string());
                 }
                 println!("{}", current_line_values.join("\t"));
             }
         }
-    } else { 
+    } else {
         let mut rng = rand::thread_rng();
         if let Some(random_record) = records.choose(&mut rng) {
             let mut values_to_print = Vec::new();
-            for col_name in &columns_to_display {
-                 let value = random_record.get(col_name).cloned().unwrap_or_else(|| {
-                    if !args.raw { String::from("[N/A]") } else { String::default() }
+            for &idx in &display_column_indices {
+                 let value = random_record.get(idx).unwrap_or_else(|| {
+                    if !args.raw { "[N/A]" } else { "" }
                 });
-                values_to_print.push(value);
+                values_to_print.push(value.to_string());
             }
 
             if !args.raw {
-                let display_cols_str = columns_to_display.iter().map(|s| s.as_str()).collect::<Vec<&str>>().join(", ");
+                let display_cols_str = columns_to_display_names.join(", ");
                 let source_name = if let Some(dir_path) = &args.directory {
                     format!("directory '{}'", dir_path.display())
                 } else if let Some(file_path) = &args.data_file {
