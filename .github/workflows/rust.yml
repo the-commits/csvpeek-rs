@@ -147,7 +147,7 @@ jobs:
       (
         !startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-')
       ) &&
-      github.repository == "the-commits/csvpeek-rs"
+      github.repository == 'the-commits/csvpeek-rs'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
