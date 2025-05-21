@@ -1,4 +1,4 @@
-name: csvpeek-rs ci und release
+name: csvpeek-rs CI & Release
 
 on:
   push:
@@ -10,7 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  EXPECTED_REPOSITORY: "the-commits/csvpeek-rs" 
 
 jobs:
   test_and_build:
@@ -23,7 +22,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable
+          toolchain: stable 
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -38,17 +37,16 @@ jobs:
 
   publish_crate:
     name: Publish to Crates.io
-    needs: test_and_build
+    needs: test_and_build 
     runs-on: ubuntu-latest
     
     if: |
       github.event_name == 'push' &&
       startsWith(github.ref, 'refs/tags/') &&
       (
-        (startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-')) || 
         (!startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-'))
       ) &&
-      github.repository == env.EXPECTED_REPOSITORY
+      github.repository == 'the-commits/csvpeek-rs'
 
     steps:
       - name: Checkout code
@@ -61,10 +59,8 @@ jobs:
       
       - name: Verify crate version matches Git tag
         run: |
-          # Hämta version från Git-taggen (ta bort eventuellt 'v'-prefix)
           TAG_VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
           
-          # Hämta version från Cargo.toml
           CARGO_VERSION=$(grep '^version *=' Cargo.toml | head -n 1 | cut -d '"' -f 2)
           
           echo "Git tag version: $TAG_VERSION"
