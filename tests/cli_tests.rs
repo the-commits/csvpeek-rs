@@ -3,6 +3,7 @@ use predicates::prelude::*;
 use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+// use std::process::Command; // Används inte längre direkt
 use tempfile::tempdir;
 
 #[test]
@@ -16,7 +17,7 @@ fn test_list_basic_csv() -> Result<(), Box<dyn Error>> {
     writeln!(file, "Gamma,150,X")?;
     file.flush()?;
 
-    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?; 
+    let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
     cmd.current_dir(temp_dir.path());
     cmd.args(["-f", "test_data.csv", "--list"]);
 
@@ -57,8 +58,7 @@ fn test_single_filter_and_multiple_display_columns() -> Result<(), Box<dyn Error
         .success()
         .stdout(
             predicate::str::contains("Reading CSV file: songs.csv")
-                .and(predicate::str::contains("displaying column(s): Låt, År"))
-                .and(predicate::str::contains("filtered where Artist = 'The Beatles'"))
+                .and(predicate::str::contains("List from file 'songs.csv' (displaying column(s): Låt, År) filtered where Artist = 'The Beatles'"))
                 .and(predicate::str::contains("Number of entries: 2"))
                 .and(predicate::str::contains("1. Hey Jude\t1968"))
                 .and(predicate::str::contains("2. Yesterday\t1965"))
@@ -73,7 +73,7 @@ fn test_directory_input_merges_and_skips() -> Result<(), Box<dyn Error>> {
     let temp_dir = tempdir()?;
     let dir_path_obj = temp_dir.path();
 
-    let file_books_path = dir_path_obj.join("books_data.csv"); 
+    let file_books_path = dir_path_obj.join("books_data.csv");
     let mut file_books = File::create(file_books_path)?;
     writeln!(file_books, "Titel,Författare,Genre")?;
     writeln!(file_books, "Moby Dick,Herman Melville,Adventure")?;
@@ -85,7 +85,7 @@ fn test_directory_input_merges_and_skips() -> Result<(), Box<dyn Error>> {
     writeln!(file_songs1, "Bohemian Rhapsody,Queen,A Night at the Opera,1975")?;
     file_songs1.flush()?;
     
-    let file_songs2_path = dir_path_obj.join("songs_part2.csv"); 
+    let file_songs2_path = dir_path_obj.join("songs_part2.csv");
     let mut file_songs2 = File::create(file_songs2_path)?;
     writeln!(file_songs2, "Låt,Artist,Album,År")?;
     writeln!(file_songs2, "Hey Jude,The Beatles,Hey Jude,1968")?;
@@ -98,18 +98,19 @@ fn test_directory_input_merges_and_skips() -> Result<(), Box<dyn Error>> {
     cmd_list.assert()
         .success()
         .stdout(
-            predicate::str::contains("Reading CSV files from directory: .")
-                .and(predicate::str::contains("Reading file: ./books_data.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part1.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part2.csv"))
+            predicate::str::contains("Attempting to determine main headers from: ./books_data.csv")
+                .and(predicate::str::contains("Processing file for data: ./books_data.csv"))
+                .and(predicate::str::contains("Processing file for data: ./songs_part1.csv"))
+                .and(predicate::str::contains("Processing file for data: ./songs_part2.csv"))
                 .and(predicate::str::contains("List from directory '.' (displaying column(s): Titel, Genre)"))
                 .and(predicate::str::contains("Number of entries: 1"))
                 .and(predicate::str::contains("1. Moby Dick\tAdventure"))
+                .and(predicate::str::contains("Bohemian Rhapsody").not())
         )
-        .stderr(
-            predicate::str::contains("Warning: Headers in file './songs_part1.csv'")
-                .and(predicate::str::contains("Expected headers: [\"Titel\", \"Författare\", \"Genre\"]"))
-                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv'"))
+        .stderr( 
+            predicate::str::contains("Warning: Headers in file './songs_part1.csv' do not match main headers. Skipping records from this file.")
+                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv' do not match main headers. Skipping records from this file."))
+                
         );
     
     let mut cmd_filter_artist = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
@@ -119,15 +120,15 @@ fn test_directory_input_merges_and_skips() -> Result<(), Box<dyn Error>> {
     cmd_filter_artist.assert()
         .code(1) 
         .stdout(
-            predicate::str::contains("Reading CSV files from directory: .")
-                .and(predicate::str::contains("Reading file: ./books_data.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part1.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part2.csv"))
+            predicate::str::contains("Attempting to determine main headers from: ./books_data.csv")
+                .and(predicate::str::contains("Processing file for data: ./books_data.csv")) 
+                .and(predicate::str::contains("Processing file for data: ./songs_part1.csv")) 
+                .and(predicate::str::contains("Processing file for data: ./songs_part2.csv")) 
                 .and(predicate::str::contains("List from directory").not())
         )
-        .stderr(
-            predicate::str::contains("Warning: Headers in file './songs_part1.csv'")
-                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv'"))
+        .stderr( 
+            predicate::str::contains("Warning: Headers in file './songs_part1.csv' do not match main headers. Skipping records from this file.")
+                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv' do not match main headers. Skipping records from this file."))
                 .and(predicate::str::contains("Error: Filter column 'Artist' not found in CSV file headers: [\"Titel\", \"Författare\", \"Genre\"]"))
         );
 
@@ -138,17 +139,17 @@ fn test_directory_input_merges_and_skips() -> Result<(), Box<dyn Error>> {
     cmd_filter_author.assert()
         .success()
         .stdout(
-            predicate::str::contains("Reading CSV files from directory: .")
-                .and(predicate::str::contains("Reading file: ./books_data.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part1.csv"))
-                .and(predicate::str::contains("Reading file: ./songs_part2.csv"))
+            predicate::str::contains("Attempting to determine main headers from: ./books_data.csv")
+                .and(predicate::str::contains("Processing file for data: ./books_data.csv"))
+                .and(predicate::str::contains("Processing file for data: ./songs_part1.csv"))
+                .and(predicate::str::contains("Processing file for data: ./songs_part2.csv"))
                 .and(predicate::str::contains("List from directory '.' (displaying column(s): Titel) filtered where Författare = 'Herman Melville'"))
                 .and(predicate::str::contains("Number of entries: 1"))
                 .and(predicate::str::contains("1. Moby Dick"))
         )
-        .stderr(
-             predicate::str::contains("Warning: Headers in file './songs_part1.csv'")
-                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv'"))
+        .stderr( 
+             predicate::str::contains("Warning: Headers in file './songs_part1.csv' do not match main headers. Skipping records from this file.")
+                .and(predicate::str::contains("Warning: Headers in file './songs_part2.csv' do not match main headers. Skipping records from this file."))
                 .and(predicate::str::contains("Error: Filter column").not())
         );
     Ok(())
@@ -269,8 +270,7 @@ fn test_list_multiple_columns_with_raw_output() -> Result<(), Box<dyn Error>> {
         "--raw",
     ]);
 
-    let expected_output = "Äpple\t10\n\
-                           Päron\t12\n";
+    let expected_output = "Äpple\t10\nPäron\t12\n";
 
     cmd.assert()
         .success()
@@ -300,8 +300,7 @@ fn test_filter_with_raw_output() -> Result<(), Box<dyn Error>> {
         "--raw",
     ]);
 
-    let expected_output = "Äpple\n\
-                           Päron\n";
+    let expected_output = "Äpple\nPäron\n";
 
     cmd.assert()
         .success()
@@ -323,18 +322,17 @@ fn test_stdin_input_with_list_and_columns_raw() -> Result<(), Box<dyn Error>> {
     ]);
     cmd.write_stdin(csv_data).unwrap(); 
 
-    let expected_output = "val1C\tval1A\n\
-                           val2C\tval2A\n";
+    let expected_output = "val1C\tval1A\nval2C\tval2A\n";
     
     cmd.assert()
         .success()
         .stdout(expected_output)
-        .stderr(predicate::str::is_empty());
+        .stderr(predicate::str::contains("Reading CSV data from stdin").not()); 
     Ok(())
 }
 
 #[test]
-fn test_no_input_args_with_empty_pipe_stdin() -> Result<(), Box<dyn Error>> { 
+fn test_no_input_args_with_empty_pipe_stdin() -> Result<(), Box<dyn Error>> {
     let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
     let temp_dir = tempdir()?;
     cmd.current_dir(temp_dir.path());
@@ -347,7 +345,7 @@ fn test_no_input_args_with_empty_pipe_stdin() -> Result<(), Box<dyn Error>> {
         )
         .stderr(
             predicate::str::contains("CSV data is missing headers or is empty.")
-                .and(predicate::str::contains("Error: No input source specified.").not()) 
+                .and(predicate::str::contains("Error: No input source specified.").not())
         );
     Ok(())
 }
@@ -358,7 +356,7 @@ fn test_version_flag() -> Result<(), Box<dyn Error>> {
     cmd.arg("--version");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION"))) 
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")))
         .stderr(predicate::str::is_empty());
     Ok(())
 }

@@ -8,13 +8,9 @@ use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Operator {
-    Eq,
-    NotEq,
-    Lt,
-    Gt,
-    LtEq,
-    GtEq,
+    Eq, NotEq, Lt, Gt, LtEq, GtEq,
 }
+
 impl fmt::Display for Operator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -94,9 +90,12 @@ Core Functionalities:
         which column's data you want to see for both listing and random selection.
 
 * Powerful Filtering:
-    * Precisely filter rows using the --filter \"COLUMN_NAME=VALUE\" syntax 
-        (case-insensitive for both column name and value). This can be repeated
-        for multiple AND-conditions.
+    * Precisely filter rows using the --filter \"COLUMN<OP>VALUE\" syntax 
+        (e.g., \"Age>=30\", \"City!=London\"). OP can be =, !=, >, <, >=, <=. 
+        This can be repeated for multiple AND-conditions.
+    * Comparisons are case-insensitive for = and !=. For ordering operators, 
+        numeric comparison is attempted first; if that fails, a lexicographical 
+        string comparison is performed.
     * Allows you to quickly drill down to the data you need.
 
 * Unix-Friendly Output:
@@ -126,17 +125,22 @@ struct Args {
     /// OP can be =, !=, >, <, >=, <=. Can be repeated for multiple AND conditions.
     /// Used with --list.
     #[clap(long, value_parser = parse_filter_arg, requires = "list", num_args = 0..)]
-    filter: Option<Vec<(String, Operator, String)>>, 
+    filter: Option<Vec<(String, Operator, String)>>,
 
     /// Path to a single CSV data file. Use "-" to read from stdin.
-    /// If neither -f nor -d is given, 'data.csv' is attempted or stdin if piped.
+    /// If neither -f nor -d is given, an attempt to read from stdin (if piped) or show help.
     #[clap(long, short = 'f')]
     data_file: Option<PathBuf>,
 
     /// Path to a directory containing CSV files to merge.
-    /// Takes precedence over --data-file.
+    /// Takes precedence over --data-file if --main-header-file is not also used to clarify source.
     #[clap(long, short = 'd')]
     directory: Option<PathBuf>,
+
+    /// Specify a file within the input directory (used with -d/--directory)
+    /// to define the main headers against which other files will be compared.
+    #[clap(long = "main-header-file", short = 'm', value_name = "FILENAME", requires = "directory")]
+    main_header_file: Option<String>,
 
     /// Specify column(s) to display. Use comma-separated values or repeat the flag.
     /// Defaults to the first column if not specified.
@@ -146,14 +150,27 @@ struct Args {
     /// Output raw data values only, one per line (for piping).
     #[clap(long)]
     raw: bool,
+
+    /// Display only the header row from the CSV data and exit.
+    /// Cannot be used with --list, --filter, --columns, or --raw.
+    #[clap(long, conflicts_with_all = ["list", "filter", "columns", "raw"])]
+    headers: bool,
 }
 
-fn parse_csv_from_reader<R: Read>(reader_source: R) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
+fn parse_csv_from_reader<R: Read>(
+    reader_source: R,
+    load_records: bool,
+) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let mut reader = csv::Reader::from_reader(reader_source);
     let headers = reader.headers()?.iter().map(String::from).collect::<Vec<String>>();
     if headers.is_empty() {
         return Err("CSV data is missing headers or is empty.".into());
     }
+
+    if !load_records {
+        return Ok((headers, Vec::new()));
+    }
+
     let mut records_data = Vec::new();
     for result in reader.records() {
         let record: csv::StringRecord = result?;
@@ -162,93 +179,135 @@ fn parse_csv_from_reader<R: Read>(reader_source: R) -> Result<(Vec<String>, Vec<
     Ok((headers, records_data))
 }
 
-fn load_data_from_csv(filepath: &PathBuf) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
+fn load_data_from_csv(filepath: &PathBuf, load_records: bool) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let file = fs::File::open(filepath)?;
-    parse_csv_from_reader(file)
+    parse_csv_from_reader(file, load_records)
 }
 
-fn load_data_from_stdin() -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
+fn load_data_from_stdin(load_records: bool) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
     let stdin = io::stdin();
-    parse_csv_from_reader(stdin.lock())
+    parse_csv_from_reader(stdin.lock(), load_records)
 }
 
-fn load_data_from_directory(dir_path: &PathBuf, be_quiet: bool) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
-    let mut master_headers: Option<Vec<String>> = None;
-    let mut combined_records: Vec<csv::StringRecord> = Vec::new();
-    let mut files_processed = 0;
-    let mut csv_file_paths: Vec<PathBuf> = Vec::new();
-
-    for entry_result in fs::read_dir(dir_path)? {
-        let entry = entry_result?;
-        let path = entry.path();
-        if path.is_file() {
-            if let Some(extension) = path.extension() {
-                if extension == "csv" {
-                    csv_file_paths.push(path);
-                }
-            }
-        }
-    }
+fn load_data_from_directory(
+    dir_path: &PathBuf,
+    be_quiet: bool,
+    load_records: bool,
+    specified_main_header_filename: &Option<String>,
+) -> Result<(Vec<String>, Vec<csv::StringRecord>), Box<dyn Error>> {
+    
+    let mut csv_file_paths: Vec<PathBuf> = fs::read_dir(dir_path)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().map_or(false, |ext| ext == "csv"))
+        .collect();
     csv_file_paths.sort();
 
-    for path in csv_file_paths {
-        if !be_quiet {
-            println!("Reading file: {}", path.display());
+    if csv_file_paths.is_empty() {
+        return Err(format!("No CSV files found in directory '{}'.", dir_path.display()).into());
+    }
+
+    let mut main_headers_option: Option<Vec<String>> = None;
+
+    if let Some(filename_str) = specified_main_header_filename {
+        let main_header_path = dir_path.join(filename_str);
+        if !csv_file_paths.iter().any(|p| p == &main_header_path) {
+             return Err(format!("Specified main header file '{}' not found or is not a .csv file in directory '{}'.", filename_str, dir_path.display()).into());
         }
-        match load_data_from_csv(&path) {
-            Ok((current_headers, current_records)) => {
-                if master_headers.is_none() {
-                    master_headers = Some(current_headers);
-                    combined_records.extend(current_records);
-                    files_processed += 1;
-                } else if Some(&current_headers) == master_headers.as_ref() {
-                    combined_records.extend(current_records);
-                    files_processed += 1;
-                } else {
-                    if !be_quiet {
-                        eprintln!("Warning: Headers in file '{}' do not match the headers of previously read files. Skipping this file.", path.display());
-                        if let Some(mh) = &master_headers {
-                             eprintln!("Expected headers: {:?}", mh);
-                             eprintln!("Received headers:  {:?}", current_headers);
-                        }
+        if !be_quiet { println!("Attempting to set main headers from specified file: {}", main_header_path.display()); }
+        match load_data_from_csv(&main_header_path, false) { 
+            Ok((headers_from_file, _)) => {
+                if headers_from_file.is_empty() {
+                    return Err(format!("Specified main header file '{}' is empty or has no headers.", main_header_path.display()).into());
+                }
+                main_headers_option = Some(headers_from_file);
+            }
+            Err(e) => {
+                return Err(format!("Failed to load headers from specified main header file '{}': {}", main_header_path.display(), e).into());
+            }
+        }
+    } else {
+        for path in &csv_file_paths {
+            if !be_quiet { println!("Attempting to determine main headers from: {}", path.display()); }
+            match load_data_from_csv(path, false) { 
+                Ok((headers_from_file, _)) => {
+                    if !headers_from_file.is_empty() {
+                        main_headers_option = Some(headers_from_file);
+                        break; 
+                    } else if !be_quiet {
+                        eprintln!("Warning: File '{}' has no headers. Trying next file for main headers.", path.display());
                     }
                 }
-            },
-            Err(e) => {
-                if !be_quiet {
-                    eprintln!("Warning: Could not read or parse CSV file '{}': {}. Skipping.", path.display(), e);
+                Err(e) => {
+                    if !be_quiet {
+                        eprintln!("Warning: Could not read file '{}' to determine main headers: {}. Trying next.", path.display(), e);
+                    }
                 }
             }
         }
     }
 
-    if files_processed == 0 || master_headers.is_none() {
-        Err(format!("No valid CSV files with matching headers found in directory '{}'.", dir_path.display()).into())
+    let final_main_headers = main_headers_option.ok_or_else(|| format!("Could not determine main headers from any suitable file in directory '{}'.", dir_path.display()))?;
+    
+    let mut combined_records: Vec<csv::StringRecord> = Vec::new();
+    let mut files_contributed_records = 0;
+
+    if load_records {
+        for path in &csv_file_paths {
+            if !be_quiet { println!("Processing file for data: {}", path.display()); }
+            match load_data_from_csv(path, true) { 
+                Ok((current_headers, records_chunk)) => {
+                    if current_headers == final_main_headers {
+                        combined_records.extend(records_chunk);
+                        files_contributed_records += 1;
+                    } else if !be_quiet {
+                        eprintln!("Warning: Headers in file '{}' do not match main headers. Skipping records from this file.", path.display());
+                    }
+                }
+                Err(e) => {
+                    if !be_quiet { 
+                        eprintln!("Warning: Could not read or parse CSV file '{}' for records: {}. Skipping.", path.display(), e); 
+                    }
+                }
+            }
+        }
     } else {
-        Ok((master_headers.unwrap(), combined_records))
+        for path in &csv_file_paths {
+            if let Ok((current_headers, _)) = load_data_from_csv(path, false) {
+                if current_headers == final_main_headers {
+                    files_contributed_records += 1;
+                }
+            }
+        }
     }
+    
+    if files_contributed_records == 0 {
+        let for_what_msg = if load_records { " with records" } else { " (for header consistency check)" };
+        return Err(format!("No CSV files{} matching main headers ({:?}) found/processed in directory '{}'.", for_what_msg, final_main_headers, dir_path.display()).into());
+    }
+
+    Ok((final_main_headers, combined_records))
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
 
+    let should_load_records = !args.headers;
+
     let (headers, records): (Vec<String>, Vec<csv::StringRecord>) = {
         if let Some(dir_path) = &args.directory {
-            if !args.raw {
-                println!("Reading CSV files from directory: {}", dir_path.display());
-            }
-            load_data_from_directory(dir_path, args.raw)?
+            load_data_from_directory(dir_path, args.raw || args.headers, should_load_records, &args.main_header_file)?
         } else if let Some(file_path) = &args.data_file {
             if file_path.to_string_lossy() == "-" {
-                if !args.raw && std::io::stdin().is_terminal() {
+                if !args.raw && !args.headers && std::io::stdin().is_terminal() {
                     println!("Reading CSV data from stdin (specified by '-f -')...");
                 }
-                load_data_from_stdin()?
+                load_data_from_stdin(should_load_records)?
             } else {
-                if !args.raw {
+                if !args.raw && !args.headers {
                     println!("Reading CSV file: {}", file_path.display());
                 }
-                load_data_from_csv(file_path)?
+                load_data_from_csv(file_path, should_load_records)?
             }
         } else {
             if std::io::stdin().is_terminal() {
@@ -256,15 +315,26 @@ fn main() -> Result<(), Box<dyn Error>> {
                 eprintln!("\nError: No input source specified. Please use -f <file>, -d <directory>, or pipe data to stdin.");
                 std::process::exit(1);
             } else {
-                 if !args.raw {
+                if !args.raw && !args.headers {
                     println!("No input file specified, reading CSV data from piped stdin...");
-                 }
-                load_data_from_stdin()?
+                }
+                load_data_from_stdin(should_load_records)?
             }
         }
     };
     
-    if records.is_empty() {
+    if args.headers {
+        if headers.is_empty() {
+            eprintln!("No headers found or could be determined from the input source.");
+        } else {
+            for header_name in &headers {
+                println!("{}", header_name);
+            }
+        }
+        return Ok(()); 
+    }
+
+    if records.is_empty() { 
         if !args.raw {
             println!("No data rows found.");
         }
@@ -308,7 +378,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                  if file_path.to_string_lossy() == "-" { "stdin".to_string() }
                  else { format!("file '{}'", file_path.display()) }
             } else { 
-                "stdin".to_string()
+                "stdin".to_string() 
             };
             list_title = format!("List from {} (displaying column(s): {})", source_name_str, display_cols_str);
         }
@@ -326,14 +396,14 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
             
-            if !args.raw {
-                let filter_descriptions: Vec<String> = raw_filters.iter()
-                    .map(|(col, op, val)| format!("{} {} '{}'", col, op, val)) // op använder Display trait
+            if !args.raw && !validated_filters.is_empty() {
+                let filter_descriptions: Vec<String> = raw_filters.iter() 
+                    .map(|(col, op, val)| format!("{} {} '{}'", col, op, val)) 
                     .collect();
                 list_title = format!("{} filtered where {}", list_title, filter_descriptions.join(" AND "));
             }
             
-            records.iter().filter(|record| { // record är &csv::StringRecord
+            records.iter().filter(|record| {
                 validated_filters.iter().all(|(col_idx, operator, filter_value_str)| {
                     if let Some(value_in_record_str) = record.get(*col_idx) {
                         match operator {
@@ -343,7 +413,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                                 let record_num_res = value_in_record_str.trim().parse::<f64>();
                                 let filter_num_res = filter_value_str.trim().parse::<f64>();
                                 if let (Ok(record_num), Ok(filter_num)) = (record_num_res, filter_num_res) {
-                                    match operator { 
+                                    match operator {
                                         Operator::Lt => record_num < filter_num,
                                         Operator::Gt => record_num > filter_num,
                                         Operator::LtEq => record_num <= filter_num,
@@ -356,12 +426,12 @@ fn main() -> Result<(), Box<dyn Error>> {
                                         Operator::Gt => value_in_record_str > filter_value_str,
                                         Operator::LtEq => value_in_record_str <= filter_value_str,
                                         Operator::GtEq => value_in_record_str >= filter_value_str,
-                                        _ => false,
+                                        _ => false, 
                                     }
                                 }
                             }
                         }
-                    } else { false }
+                    } else { false } 
                 })
             }).collect()
         } else {
@@ -387,7 +457,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     println!("{}. {}", index + 1, line_str);
                 }
             }
-        } else {
+        } else { 
             for record_ref in &records_to_process_refs {
                 let mut current_line_values = Vec::new();
                 for &idx in &display_column_indices {
@@ -422,7 +492,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             } else {
                 println!("{}", values_to_print.join("\t"));
             }
-        } else if !args.raw && !records.is_empty() { 
+        } else if !args.raw && !records.is_empty() {
              println!("Could not select a random entry (unexpected).");
         }
     }
@@ -446,24 +516,25 @@ mod tests {
 
     #[test]
     fn test_parse_filter_arg_invalid_ops_or_format() {
-        assert!(parse_filter_arg("ColVal").is_err());
+        assert!(parse_filter_arg("ColVal").is_err()); 
         assert!(parse_filter_arg("Col<>Val").is_err());
         assert_eq!(parse_filter_arg("Col><Val"), Ok(("Col".to_string(), Operator::Gt, "<Val".to_string())));
     }
 
-    #[test]
-    fn test_parse_filter_arg_empty_key_error() {
-        let result = parse_filter_arg("=Value");
-        assert!(result.is_err());
-        if let Err(e) = result {
-            assert!(e.contains("Column name cannot be empty"));
-        }
-        let result_op = parse_filter_arg(">=Value");
-        assert!(result_op.is_err());
-        if let Err(e) = result_op {
-            assert!(e.contains("Column name cannot be empty"));
-        }
-    }
+     #[test]
+     fn test_parse_filter_arg_empty_key_error() {
+         let result = parse_filter_arg("=Value");
+         assert!(result.is_err());
+         if let Err(e) = result {
+             assert!(e.contains("Column name cannot be empty"));
+         }
+
+         let result_op = parse_filter_arg(">=Value"); 
+         assert!(result_op.is_err());
+         if let Err(e) = result_op {
+             assert!(e.contains("Column name cannot be empty"));
+         }
+     }
 
     #[test]
     fn test_parse_filter_arg_empty_value_is_ok() {
