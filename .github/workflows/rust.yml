@@ -80,32 +80,37 @@ jobs:
           path: csvpeek-rs-${{ github.ref_name }}-windows-x86_64-packed.zip
 
   build_macos_intel:
-    name: Build macOS (Intel x86_64)
-    runs-on: macos-latest 
-    needs: test_suite
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-      - name: Build macOS (Intel)
-        run: cargo build --verbose --locked --release --target x86_64-apple-darwin
-      - name: Test macOS (Intel)
-        run: cargo test --verbose --locked --release --target x86_64-apple-darwin
-      - name: Prepare macOS Intel artifact
-        run: |
-          mkdir -p staging/macos-intel
-          cp target/x86_64-apple-darwin/release/csvpeek-rs staging/macos-intel/
-          tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz -C staging/macos-intel .
-      - name: Upload macOS Intel Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: csvpeek-rs-macos-x86_64
-          path: csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz
+      name: Build & Test macOS (Intel x86_64)
+      runs-on: macos-latest 
+      needs: test_suite
+      steps:
+        - name: Checkout code
+          uses: actions/checkout@v4
+
+        - name: Install Rust toolchain
+          uses: dtolnay/rust-toolchain@stable
+          with:
+            toolchain: stable
+
+        - name: Cache Cargo dependencies
+          uses: Swatinem/rust-cache@v2
+
+        - name: Add rustup target for Intel macOS
+          run: rustup target add x86_64-apple-darwin
+
+        - name: Build macOS (Intel)
+          run: cargo build --verbose --locked --release --target x86_64-apple-darwin
+
+        - name: Prepare macOS Intel artifact
+          run: |
+            mkdir -p staging/macos-intel
+            cp target/x86_64-apple-darwin/release/csvpeek-rs staging/macos-intel/
+            tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz -C staging/macos-intel .
+        - name: Upload macOS Intel Artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: csvpeek-rs-macos-x86_64
+            path: csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz
 
   build_macos_arm:
     name: Build macOS (Apple Silicon aarch64)
@@ -136,7 +141,34 @@ jobs:
         with:
           name: csvpeek-rs-macos-aarch64
           path: csvpeek-rs-${{ github.ref_name }}-macos-aarch64.tar.gz
+  create_github_release:
+    name: Create GitHub Release & Upload Assets
+    needs: [build_linux_windows, build_macos_intel, build_macos_arm] 
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts 
+      
+      - name: List downloaded artifacts (for debugging)
+        run: ls -R release-artifacts
 
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/csvpeek-rs-linux-x86_64/csvpeek-rs-*-linux-x86_64.tar.gz
+            release-artifacts/csvpeek-rs-windows-x86_64-unpacked/csvpeek-rs-*-windows-x86_64-unpacked.zip
+            release-artifacts/csvpeek-rs-windows-x86_64-packed/csvpeek-rs-*-windows-x86_64-packed.zip
+            release-artifacts/csvpeek-rs-macos-x86_64/csvpeek-rs-*-macos-x86_64.tar.gz
+            release-artifacts/csvpeek-rs-macos-aarch64/csvpeek-rs-*-macos-aarch64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   publish_crate:
     name: Publish to Crates.io
     needs: test_suite
@@ -172,32 +204,3 @@ jobs:
         run: |
           echo "Publishing version $CARGO_VERSION (${{ github.ref_name }}) to crates.io..."
           cargo publish --token "${CRATES_IO_TOKEN}"
-
-  create_github_release:
-    name: Create GitHub Release & Upload Assets
-    needs: [build_linux_windows, build_macos_intel, build_macos_arm] 
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    steps:
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts 
-      
-      - name: List downloaded artifacts (for debugging)
-        run: ls -R release-artifacts
-
-      - name: Create Release and Upload Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          fail_on_unmatched_files: true
-          files: |
-            release-artifacts/csvpeek-rs-linux-x86_64/csvpeek-rs-*-linux-x86_64.tar.gz
-            release-artifacts/csvpeek-rs-windows-x86_64-unpacked/csvpeek-rs-*-windows-x86_64-unpacked.zip
-            release-artifacts/csvpeek-rs-windows-x86_64-packed/csvpeek-rs-*-windows-x86_64-packed.zip
-            release-artifacts/csvpeek-rs-macos-x86_64/csvpeek-rs-*-macos-x86_64.tar.gz
-            release-artifacts/csvpeek-rs-macos-aarch64/csvpeek-rs-*-macos-aarch64.tar.gz
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
