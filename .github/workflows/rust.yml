@@ -160,6 +160,8 @@ jobs:
       - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
+          draft: true
+          prerelease: false
           fail_on_unmatched_files: true
           files: |
             release-artifacts/csvpeek-rs-linux-x86_64/csvpeek-rs-*-linux-x86_64.tar.gz
