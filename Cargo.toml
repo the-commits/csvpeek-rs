@@ -8,7 +8,7 @@ license = "GPL-3.0-only"
 repository = "https://github.com/the-commits/csvpeek-rs"
 readme = "README.md"
 keywords = ["csv", "cli", "data", "peek", "filter"]
-categories = ["command-line-utilities", "data-processing"]
+categories = ["command-line-utilities", "text-processing"]
 publish = true
 
 [dependencies]
