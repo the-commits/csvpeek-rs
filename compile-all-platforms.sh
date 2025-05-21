@@ -27,12 +27,12 @@ echo "Building for Windows (x86_64)..."
 cross build --target ${TARGET_WINDOWS_X86_64} --release --locked --verbose
 
 echo ""
-echo "Building for macOS (Intel x86_64)..."
-cross build --target ${TARGET_MACOS_X86_64} --release --locked --verbose
+echo "Skip building for macOS (Intel x86_64)..."
+# cross build --target ${TARGET_MACOS_X86_64} --release --locked --verbose
 
 echo ""
-echo "Building for macOS (Apple Silicon aarch64)..."
-cross build --target ${TARGET_MACOS_AARCH64} --release --locked --verbose
+echo "Skip building for macOS (Apple Silicon aarch64)..."
+# cross build --target ${TARGET_MACOS_AARCH64} --release --locked --verbose
 
 mkdir -p "${RELEASE_DIR}/linux-x86_64"
 mkdir -p "${RELEASE_DIR}/macos-x86_64"
@@ -49,8 +49,8 @@ echo ""
 echo "Copying binaries to '${RELEASE_DIR}' subdirectories..."
 
 cp "target/${TARGET_LINUX_X86_64}/release/${BIN_NAME}" "${RELEASE_DIR}/linux-x86_64/"
-cp "target/${TARGET_MACOS_X86_64}/release/${BIN_NAME}" "${RELEASE_DIR}/macos-x86_64/"
-cp "target/${TARGET_MACOS_AARCH64}/release/${BIN_NAME}" "${RELEASE_DIR}/macos-aarch64/"
+# cp "target/${TARGET_MACOS_X86_64}/release/${BIN_NAME}" "${RELEASE_DIR}/macos-x86_64/"
+# cp "target/${TARGET_MACOS_AARCH64}/release/${BIN_NAME}" "${RELEASE_DIR}/macos-aarch64/"
 
 WINDOWS_SOURCE_EXE="target/${TARGET_WINDOWS_X86_64}/release/${BIN_NAME}.exe"
 cp "${WINDOWS_SOURCE_EXE}" "${WIN_UNPACKED_DIR}/${BIN_NAME}.exe"
@@ -69,11 +69,11 @@ then
     echo "Compressing Windows packed binary in ${WIN_PACKED_DIR}..."
     upx --best --lzma "${WIN_PACKED_DIR}/${BIN_NAME}.exe" || echo "UPX compression failed for Windows binary in ${WIN_PACKED_DIR} (continuing)..."
     
-    echo "Compressing macOS Intel binary..."
-    upx --best --lzma "${RELEASE_DIR}/macos-x86_64/${BIN_NAME}" || echo "UPX compression failed for macOS Intel binary (continuing)..."
+  #  echo "Compressing macOS Intel binary..."
+  #  upx --best --lzma "${RELEASE_DIR}/macos-x86_64/${BIN_NAME}" || echo "UPX compression failed for macOS Intel binary (continuing)..."
     
-    echo "Compressing macOS Apple Silicon binary..."
-    upx --best --lzma "${RELEASE_DIR}/macos-aarch64/${BIN_NAME}" || echo "UPX compression failed for macOS Apple Silicon binary (continuing)..."
+  #  echo "Compressing macOS Apple Silicon binary..."
+  #  upx --best --lzma "${RELEASE_DIR}/macos-aarch64/${BIN_NAME}" || echo "UPX compression failed for macOS Apple Silicon binary (continuing)..."
     
     echo "UPX compression attempt finished."
 else
@@ -89,6 +89,6 @@ echo "Final binaries are in the '${RELEASE_DIR}' subdirectories:"
 echo "- Linux x86_64:      ${RELEASE_DIR}/linux-x86_64/${BIN_NAME}"
 echo "- Windows x86_64 (unpacked): ${WIN_UNPACKED_DIR}/${BIN_NAME}.exe"
 echo "- Windows x86_64 (packed):   ${WIN_PACKED_DIR}/${BIN_NAME}.exe"
-echo "- macOS Intel:       ${RELEASE_DIR}/macos-x86_64/${BIN_NAME}"
-echo "- macOS Apple Silicon: ${RELEASE_DIR}/macos-aarch64/${BIN_NAME}"
+# echo "- macOS Intel:       ${RELEASE_DIR}/macos-x86_64/${BIN_NAME}"
+# echo "- macOS Apple Silicon: ${RELEASE_DIR}/macos-aarch64/${BIN_NAME}"
 echo "-----------------------------------------------------"

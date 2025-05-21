@@ -10,71 +10,195 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  EXPECTED_REPOSITORY: "the-commits/csvpeek-rs"
 
 jobs:
-  test_and_build:
-    name: Test & Build
+  test_suite:
+    name: Run All Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable 
-
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Build
-        run: cargo build --verbose --locked
-
-      - name: Run tests
-        run: cargo test --verbose --locked
-
-  publish_crate:
-    name: Publish to Crates.io
-    needs: test_and_build 
-    runs-on: ubuntu-latest
-    
-    if: |
-      github.event_name == 'push' &&
-      startsWith(github.ref, 'refs/tags/') &&
-      (
-        (!startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-'))
-      ) &&
-      github.repository == 'the-commits/csvpeek-rs'
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Run tests (unit & integration)
+        run: cargo test --verbose --locked --all-features
+
+  build_linux_windows:
+    name: Build Linux & Windows
+    runs-on: ubuntu-latest
+    needs: test_suite
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Add rustup targets for cross
+        run: |
+          rustup target add x86_64-unknown-linux-gnu
+          rustup target add x86_64-pc-windows-gnu
+      - name: Install cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --branch main
+      - name: Make compile script executable
+        run: chmod +x compile-all-platforms.sh
+      - name: Run compile script (builds Linux & Windows, creates packed/unpacked Win)
+        run: ./compile-all-platforms.sh
+
+      - name: Prepare Linux Artifact
+        run: |
+          cd releases/linux-x86_64
+          tar -czvf ../../csvpeek-rs-${{ github.ref_name }}-linux-x86_64.tar.gz csvpeek-rs
+          cd ../..
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csvpeek-rs-linux-x86_64
+          path: csvpeek-rs-${{ github.ref_name }}-linux-x86_64.tar.gz
+
+      - name: Prepare Windows Unpacked Artifact
+        run: |
+          cd releases/windows-x86_64/unpacked
+          zip -j ../../../csvpeek-rs-${{ github.ref_name }}-windows-x86_64-unpacked.zip csvpeek-rs.exe
+          cd ../../..
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csvpeek-rs-windows-x86_64-unpacked
+          path: csvpeek-rs-${{ github.ref_name }}-windows-x86_64-unpacked.zip
       
+      - name: Prepare Windows Packed Artifact
+        run: |
+          cd releases/windows-x86_64/packed
+          zip -j ../../../csvpeek-rs-${{ github.ref_name }}-windows-x86_64-packed.zip csvpeek-rs.exe
+          cd ../../..
+      - uses: actions/upload-artifact@v4
+        with:
+          name: csvpeek-rs-windows-x86_64-packed
+          path: csvpeek-rs-${{ github.ref_name }}-windows-x86_64-packed.zip
+
+  build_macos_intel:
+    name: Build macOS (Intel x86_64)
+    runs-on: macos-latest 
+    needs: test_suite
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Build macOS (Intel)
+        run: cargo build --verbose --locked --release --target x86_64-apple-darwin
+      - name: Test macOS (Intel)
+        run: cargo test --verbose --locked --release --target x86_64-apple-darwin
+      - name: Prepare macOS Intel artifact
+        run: |
+          mkdir -p staging/macos-intel
+          cp target/x86_64-apple-darwin/release/csvpeek-rs staging/macos-intel/
+          tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz -C staging/macos-intel .
+      - name: Upload macOS Intel Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csvpeek-rs-macos-x86_64
+          path: csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz
+
+  build_macos_arm:
+    name: Build macOS (Apple Silicon aarch64)
+    runs-on: macos-latest 
+    needs: test_suite
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+      - name: Add rustup target for Apple Silicon
+        run: rustup target add aarch64-apple-darwin
+      - name: Build macOS (Apple Silicon)
+        run: cargo build --verbose --locked --release --target aarch64-apple-darwin
+      - name: Test macOS (Apple Silicon)
+        run: cargo test --verbose --locked --release --target aarch64-apple-darwin
+      - name: Prepare macOS ARM artifact
+        run: |
+          mkdir -p staging/macos-arm
+          cp target/aarch64-apple-darwin/release/csvpeek-rs staging/macos-arm/
+          tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-aarch64.tar.gz -C staging/macos-arm .
+      - name: Upload macOS ARM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: csvpeek-rs-macos-aarch64
+          path: csvpeek-rs-${{ github.ref_name }}-macos-aarch64.tar.gz
+
+  publish_crate:
+    name: Publish to Crates.io
+    needs: test_suite
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      (
+        !startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-')
+      ) &&
+      github.repository == env.EXPECTED_REPOSITORY
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
       - name: Verify crate version matches Git tag
         run: |
-          TAG_VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
-          
+          TAG_VERSION="${{ github.ref_name }}"
           CARGO_VERSION=$(grep '^version *=' Cargo.toml | head -n 1 | cut -d '"' -f 2)
-          
           echo "Git tag version: $TAG_VERSION"
           echo "Cargo.toml version: $CARGO_VERSION"
-          
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
             echo "Error: Git tag '$TAG_VERSION' does not match crate version in Cargo.toml '$CARGO_VERSION'."
             exit 1
           fi
-          echo "Version check passed. Proceeding with publish."
-
+          echo "Version check passed."
       - name: Publish to crates.io
         env:
           CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: |
           echo "Publishing version $CARGO_VERSION (${{ github.ref_name }}) to crates.io..."
           cargo publish --token "${CRATES_IO_TOKEN}"
+
+  create_github_release:
+    name: Create GitHub Release & Upload Assets
+    needs: [build_linux_windows, build_macos_intel, build_macos_arm] 
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts 
+      
+      - name: List downloaded artifacts (for debugging)
+        run: ls -R release-artifacts
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/csvpeek-rs-linux-x86_64/csvpeek-rs-*-linux-x86_64.tar.gz
+            release-artifacts/csvpeek-rs-windows-x86_64-unpacked/csvpeek-rs-*-windows-x86_64-unpacked.zip
+            release-artifacts/csvpeek-rs-windows-x86_64-packed/csvpeek-rs-*-windows-x86_64-packed.zip
+            release-artifacts/csvpeek-rs-macos-x86_64/csvpeek-rs-*-macos-x86_64.tar.gz
+            release-artifacts/csvpeek-rs-macos-aarch64/csvpeek-rs-*-macos-aarch64.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
