@@ -201,19 +201,19 @@ jobs:
           fi
           echo "Version check passed."
       - name: Check if crate version already exists
-          run: |
-            CRATE_NAME="csvpeek-rs"
-            CRATE_VERSION="${{ env.CARGO_VERSION }}"
+        run: |
+          CRATE_NAME="csvpeek-rs"
+          CRATE_VERSION="${{ env.CARGO_VERSION }}"
 
-            HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${CRATE_NAME}/${CRATE_VERSION}/download")
-            
-            if [ "$HTTP_STATUS" -eq 302 ] || [ "$HTTP_STATUS" -eq 200 ]; then
-              echo "Version ${CRATE_VERSION} of ${CRATE_NAME} already exists on crates.io. Skipping publish."
-              echo "SKIP_PUBLISH=true" >> $GITHUB_ENV
-            else
-              echo "Version ${CRATE_VERSION} of ${CRATE_NAME} does not appear to exist. Proceeding with publish."
-              echo "SKIP_PUBLISH=false" >> $GITHUB_ENV
-            fi
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://crates.io/api/v1/crates/${CRATE_NAME}/${CRATE_VERSION}/download")
+          
+          if [ "$HTTP_STATUS" -eq 302 ] || [ "$HTTP_STATUS" -eq 200 ]; then
+            echo "Version ${CRATE_VERSION} of ${CRATE_NAME} already exists on crates.io. Skipping publish."
+            echo "SKIP_PUBLISH=true" >> $GITHUB_ENV
+          else
+            echo "Version ${CRATE_VERSION} of ${CRATE_NAME} does not appear to exist. Proceeding with publish."
+            echo "SKIP_PUBLISH=false" >> $GITHUB_ENV
+          fi
       - name: Publish to crates.io
         if: env.SKIP_PUBLISH == 'false'
         env:
