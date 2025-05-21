@@ -1,22 +1,84 @@
-name: Rust
+name: csvpeek-rs ci und release
 
 on:
   push:
     branches: [ "main" ]
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
   pull_request:
     branches: [ "main" ]
 
 env:
   CARGO_TERM_COLOR: always
+  EXPECTED_REPOSITORY: "the-commits/csvpeek-rs" 
 
 jobs:
-  build:
-
+  test_and_build:
+    name: Test & Build
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --verbose --locked
+
+      - name: Run tests
+        run: cargo test --verbose --locked
+
+  publish_crate:
+    name: Publish to Crates.io
+    needs: test_and_build
+    runs-on: ubuntu-latest
+    
+    if: |
+      github.event_name == 'push' &&
+      startsWith(github.ref, 'refs/tags/') &&
+      (
+        (startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-')) || 
+        (!startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-'))
+      ) &&
+      github.repository == env.EXPECTED_REPOSITORY
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      
+      - name: Verify crate version matches Git tag
+        run: |
+          # Hämta version från Git-taggen (ta bort eventuellt 'v'-prefix)
+          TAG_VERSION=$(echo "${{ github.ref_name }}" | sed 's/^v//')
+          
+          # Hämta version från Cargo.toml
+          CARGO_VERSION=$(grep '^version *=' Cargo.toml | head -n 1 | cut -d '"' -f 2)
+          
+          echo "Git tag version: $TAG_VERSION"
+          echo "Cargo.toml version: $CARGO_VERSION"
+          
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: Git tag '$TAG_VERSION' does not match crate version in Cargo.toml '$CARGO_VERSION'."
+            exit 1
+          fi
+          echo "Version check passed. Proceeding with publish."
+
+      - name: Publish to crates.io
+        env:
+          CRATES_IO_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          echo "Publishing version $CARGO_VERSION (${{ github.ref_name }}) to crates.io..."
+          cargo publish --token "${CRATES_IO_TOKEN}"
