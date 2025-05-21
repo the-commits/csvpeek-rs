@@ -10,7 +10,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  EXPECTED_REPOSITORY: "the-commits/csvpeek-rs"
 
 jobs:
   test_suite:
@@ -148,7 +147,7 @@ jobs:
       (
         !startsWith(github.ref_name, 'v') && contains(github.ref_name, '.') && !contains(github.ref_name, '-')
       ) &&
-      github.repository == env.EXPECTED_REPOSITORY
+      github.repository == "the-commits/csvpeek-rs"
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
