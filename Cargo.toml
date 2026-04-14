@@ -13,7 +13,7 @@ publish = true
 
 [dependencies]
 clap = { version = "4.5.4", features = ["derive", "cargo"] }
-rand = "0.8.5"
+rand = "0.9.3"
 csv = "1.3"
 regex = "1"
 once_cell = "1"
