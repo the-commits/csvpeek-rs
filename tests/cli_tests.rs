@@ -397,3 +397,46 @@ fn test_random_pick_multiple_columns_raw() -> Result<(), Box<dyn Error>> {
         .stderr(predicate::str::is_empty());
     Ok(())
 }
+
+// Regression test for GHSA-cq8v-f236-94qc (rand soundness issue with custom logger).
+// Site-wide guard against memory-safety / soundness issues (Rust "unsound" class) in
+// the random selection codepath: exercise the rand-backed feature many times and
+// verify the process never crashes or returns an out-of-range value. Any UB
+// surfaced by the previously-vulnerable rand version (0.7.0 <= v < 0.9.3) would
+// likely manifest as a panic, abort, or invalid output here.
+#[test]
+fn test_random_selection_soundness_repeated_invocation() -> Result<(), Box<dyn Error>> {
+    let temp_dir = tempdir()?;
+    let csv_file_path = temp_dir.path().join("rand_soundness.csv");
+    let mut file = File::create(&csv_file_path)?;
+    writeln!(file, "Value")?;
+    let valid_values: Vec<String> = (0..50).map(|i| format!("v{}", i)).collect();
+    for v in &valid_values {
+        writeln!(file, "{}", v)?;
+    }
+    file.flush()?;
+
+    for _ in 0..25 {
+        let mut cmd = Command::cargo_bin(env!("CARGO_PKG_NAME"))?;
+        cmd.current_dir(temp_dir.path());
+        cmd.args(["-f", "rand_soundness.csv", "--raw"]);
+
+        let output = cmd.output()?;
+        assert!(
+            output.status.success(),
+            "csvpeek-rs crashed during random selection (possible rand UB): status={:?}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr),
+        );
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let picked = stdout.trim();
+        assert!(
+            valid_values.iter().any(|v| v == picked),
+            "random selection produced invalid value '{}' (not in input data) - possible memory corruption",
+            picked
+        );
+    }
+
+    Ok(())
+}

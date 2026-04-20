@@ -1,5 +1,5 @@
 use clap::{CommandFactory, Parser};
-use rand::seq::SliceRandom;
+use rand::seq::IndexedRandom;
 use std::error::Error;
 use std::fs;
 use std::io::{self, IsTerminal, Read};
@@ -468,7 +468,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     } else {
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         if let Some(random_record) = records.choose(&mut rng) {
             let mut values_to_print = Vec::new();
             for &idx in &display_column_indices {
