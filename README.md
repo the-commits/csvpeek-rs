@@ -114,20 +114,6 @@ Output:
 ```
 Reading CSV file: songs.csv
 List from file 'songs.csv' (displaying column(s): Title) filtered where Artist = 'The Beatles'
-Number of entries: 2
-1. Hey Jude
-2. Waterloo Sunset
-```
-
-```bash
-csvpeek-rs -f songs.csv --list --filter "Artist=The Beatles" -c Title
-```
-
-Output:
-
-```
-Reading CSV file: songs.csv
-List from file 'songs.csv' (displaying column(s): Title) filtered where Artist = 'The Beatles'
 Number of entries: 1
 1. Hey Jude
 ```
@@ -153,22 +139,6 @@ Number of entries: 2
 ### 7\. Combine multiple filters (AND logic)
 
 List Rock songs with a Rating greater than or equal to 4.
-
-```bash
-csvpeek-rs -f songs.csv --list --filter "Genre=Rock" --filter "Rating>=4" -c "Title,Artist,Rating"
-```
-
-Output:
-
-```
-Reading CSV file: songs.csv
-List from file 'songs.csv' (displaying column(s): Title, Artist, Rating) filtered where Genre = 'Rock' AND Rating >= '4'
-Number of entries: 4
-1. Bohemian Rhapsody	Queen	5
-2. Hey Jude	The Beatles	4
-3. Stairway to Heaven	Led Zeppelin	4 
-4. Like a Rolling Stone	Bob Dylan	4
-```
 
 ```bash
 csvpeek-rs -f songs.csv --list --filter "Genre=Rock" --filter "Rating>=4" -c "Title,Artist,Rating"
