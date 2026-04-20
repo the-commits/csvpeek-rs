@@ -34,6 +34,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Compute ref slug
+        run: echo "REF_SLUG=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -52,32 +54,32 @@ jobs:
       - name: Prepare Linux Artifact
         run: |
           cd releases/linux-x86_64
-          tar -czvf ../../csvpeek-rs-${{ github.ref_name }}-linux-x86_64.tar.gz csvpeek-rs
+          tar -czvf ../../csvpeek-rs-${{ env.REF_SLUG }}-linux-x86_64.tar.gz csvpeek-rs
           cd ../..
       - uses: actions/upload-artifact@v4
         with:
           name: csvpeek-rs-linux-x86_64
-          path: csvpeek-rs-${{ github.ref_name }}-linux-x86_64.tar.gz
+          path: csvpeek-rs-${{ env.REF_SLUG }}-linux-x86_64.tar.gz
 
       - name: Prepare Windows Unpacked Artifact
         run: |
           cd releases/windows-x86_64/unpacked
-          zip -j ../../../csvpeek-rs-${{ github.ref_name }}-windows-x86_64-unpacked.zip csvpeek-rs.exe
+          zip -j ../../../csvpeek-rs-${{ env.REF_SLUG }}-windows-x86_64-unpacked.zip csvpeek-rs.exe
           cd ../../..
       - uses: actions/upload-artifact@v4
         with:
           name: csvpeek-rs-windows-x86_64-unpacked
-          path: csvpeek-rs-${{ github.ref_name }}-windows-x86_64-unpacked.zip
+          path: csvpeek-rs-${{ env.REF_SLUG }}-windows-x86_64-unpacked.zip
       
       - name: Prepare Windows Packed Artifact
         run: |
           cd releases/windows-x86_64/packed
-          zip -j ../../../csvpeek-rs-${{ github.ref_name }}-windows-x86_64-packed.zip csvpeek-rs.exe
+          zip -j ../../../csvpeek-rs-${{ env.REF_SLUG }}-windows-x86_64-packed.zip csvpeek-rs.exe
           cd ../../..
       - uses: actions/upload-artifact@v4
         with:
           name: csvpeek-rs-windows-x86_64-packed
-          path: csvpeek-rs-${{ github.ref_name }}-windows-x86_64-packed.zip
+          path: csvpeek-rs-${{ env.REF_SLUG }}-windows-x86_64-packed.zip
 
   build_macos_intel:
       name: Build & Test macOS (Intel x86_64)
@@ -86,6 +88,9 @@ jobs:
       steps:
         - name: Checkout code
           uses: actions/checkout@v4
+
+        - name: Compute ref slug
+          run: echo "REF_SLUG=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
 
         - name: Install Rust toolchain
           uses: dtolnay/rust-toolchain@stable
@@ -105,12 +110,12 @@ jobs:
           run: |
             mkdir -p staging/macos-intel
             cp target/x86_64-apple-darwin/release/csvpeek-rs staging/macos-intel/
-            tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz -C staging/macos-intel .
+            tar -czvf csvpeek-rs-${{ env.REF_SLUG }}-macos-x86_64.tar.gz -C staging/macos-intel .
         - name: Upload macOS Intel Artifact
           uses: actions/upload-artifact@v4
           with:
             name: csvpeek-rs-macos-x86_64
-            path: csvpeek-rs-${{ github.ref_name }}-macos-x86_64.tar.gz
+            path: csvpeek-rs-${{ env.REF_SLUG }}-macos-x86_64.tar.gz
 
   build_macos_arm:
     name: Build macOS (Apple Silicon aarch64)
@@ -119,6 +124,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+      - name: Compute ref slug
+        run: echo "REF_SLUG=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -135,12 +142,12 @@ jobs:
         run: |
           mkdir -p staging/macos-arm
           cp target/aarch64-apple-darwin/release/csvpeek-rs staging/macos-arm/
-          tar -czvf csvpeek-rs-${{ github.ref_name }}-macos-aarch64.tar.gz -C staging/macos-arm .
+          tar -czvf csvpeek-rs-${{ env.REF_SLUG }}-macos-aarch64.tar.gz -C staging/macos-arm .
       - name: Upload macOS ARM Artifact
         uses: actions/upload-artifact@v4
         with:
           name: csvpeek-rs-macos-aarch64
-          path: csvpeek-rs-${{ github.ref_name }}-macos-aarch64.tar.gz
+          path: csvpeek-rs-${{ env.REF_SLUG }}-macos-aarch64.tar.gz
   create_github_release:
     name: Create GitHub Release & Upload Assets
     needs: [build_linux_windows, build_macos_intel, build_macos_arm] 
